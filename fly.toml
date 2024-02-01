@@ -1,0 +1,29 @@
+# fly.toml file generated for countrygen on 2024-01-31T12:58:50-08:00
+
+app = "countrygen"
+kill_signal = "SIGINT"
+kill_timeout = 5
+mounts = []
+processes = []
+
+[env]
+  APPLICATION_ID = "1196332894856155247"
+  PUBLIC_KEY = "71cbb6dc1a47c084c8c4c66c0365fd8f7a54a496408006c78dcba06d67ba4ddb"
+
+[[services]]
+  internal_port = 3000
+  processes = ["app"]
+  protocol = "tcp"
+  [services.concurrency]
+    hard_limit = 25
+    soft_limit = 20
+    type = "connections"
+
+  [[services.ports]]
+    force_https = true
+    handlers = ["http"]
+    port = 80
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443

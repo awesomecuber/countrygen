@@ -1,9 +1,17 @@
 use api::Command;
-use axum::{routing::post, Json, Router};
+use axum::{
+    body::Bytes,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    routing::post,
+    Json, Router,
+};
 use color_eyre::{
     eyre::{eyre, WrapErr},
     Result,
 };
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 
@@ -76,10 +84,16 @@ mod api {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let bot_key =
-        std::env::var("BOT_KEY").wrap_err(eyre!("must specify bot key with BOT_KEY env var!"))?;
+    let bot_key = std::env::var("BOT_KEY").wrap_err(eyre!("must specify bot key with BOT_KEY"))?;
     let application_id = std::env::var("APPLICATION_ID")
         .wrap_err(eyre!("must specify application ID with APPLICATION_ID"))?;
+    let interaction_endpoints_url = std::env::var("INTERACTION_ENDPOINTS_URL").ok();
+    let public_key =
+        std::env::var("PUBLIC_KEY").wrap_err(eyre!("must specify public key with PUBLIC_KEY"))?;
+    let verifying_key = {
+        let bytes = parse_hex(&public_key).ok_or(eyre!("invalid hex"))?;
+        VerifyingKey::from_bytes(&bytes)?
+    };
 
     let discord_client = api::Client::new(&bot_key)?;
 
@@ -93,27 +107,103 @@ async fn main() -> Result<()> {
         )
         .await?;
 
-    tokio::spawn(async move {
-        discord_client
-            .set_interaction_endpoints_url("https://rude-bars-sort.loca.lt")
-            .await
-            .unwrap()
-    });
+    if let Some(url) = interaction_endpoints_url {
+        tokio::spawn(async move {
+            discord_client
+                .set_interaction_endpoints_url(&url)
+                .await
+                .unwrap()
+        });
+    }
 
-    let app = Router::new().route("/", post(handle));
-    let listener = TcpListener::bind("127.0.0.1:3000").await?;
+    let app = Router::new()
+        .route("/", post(handle))
+        .with_state(verifying_key);
+    let listener = TcpListener::bind("0.0.0.0:3000").await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
 
 #[axum::debug_handler]
-async fn handle(Json(interaction): Json<Interaction>) -> Json<InteractionResponse> {
-    println!("{:?}", interaction);
-    let response = InteractionResponse::Pong {
-        _type: InteractionCallbackType,
+async fn handle(
+    State(verifying_key): State<VerifyingKey>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<InteractionResponse>, (StatusCode, &'static str)> {
+    let signature = headers
+        .get("X-Signature-Ed25519")
+        .ok_or((StatusCode::BAD_REQUEST, "expected signature key"))?
+        .to_str()
+        .map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                "expected signature key to be valid string",
+            )
+        })?;
+    let timestamp = headers
+        .get("X-Signature-Timestamp")
+        .ok_or((StatusCode::BAD_REQUEST, "expected signature timestamp"))?
+        .to_str()
+        .map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                "expected signature timestamp to be valid string",
+            )
+        })?;
+
+    verify_discord_message(verifying_key, signature, timestamp, &body)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "invalid!!!"))?;
+
+    let interaction: Interaction = serde_json::from_slice(&body)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "failed to parse interaction"))?;
+
+    let response = match interaction {
+        Interaction::Ping { .. } => InteractionResponse::Pong {
+            _type: InteractionCallbackType,
+        },
+        Interaction::ApplicationCommand { data, .. } => match data.name.as_str() {
+            "city" => InteractionResponse::ChannelMessageWithSource {
+                _type: InteractionCallbackType,
+                data: Message {
+                    content: {
+                        let cities: Vec<_> = include_str!("city.txt").lines().collect();
+                        (*cities.choose(&mut rand::thread_rng()).unwrap()).to_owned()
+                    },
+                },
+            },
+            _ => return Err((StatusCode::BAD_REQUEST, "unknown command")),
+        },
     };
-    println!("{}", serde_json::to_string(&response).unwrap());
-    Json(response)
+    Ok(Json(response))
+}
+
+pub fn verify_discord_message(
+    public_key: VerifyingKey,
+    signature: &str,
+    timestamp: &str,
+    body: &[u8],
+) -> Result<()> {
+    let signature_bytes = parse_hex(signature).ok_or(eyre!("invalid hex"))?;
+    let signature = Signature::from_bytes(&signature_bytes);
+
+    // Format the data to verify (Timestamp + body)
+    let msg = [timestamp.as_bytes(), body].concat();
+
+    public_key.verify(&msg, &signature)?;
+
+    Ok(())
+}
+
+fn parse_hex<const N: usize>(s: &str) -> Option<[u8; N]> {
+    if s.len() != N * 2 {
+        return None;
+    }
+
+    let mut res = [0; N];
+    for (i, byte) in res.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(s.get(2 * i..2 * (i + 1))?, 16).ok()?;
+    }
+    Some(res)
 }
 
 #[derive(Debug, Deserialize)]
@@ -123,6 +213,16 @@ enum Interaction {
         #[serde(rename = "type")]
         _type: InteractionType<1>,
     },
+    ApplicationCommand {
+        #[serde(rename = "type")]
+        _type: InteractionType<2>,
+        data: ApplicationCommandData,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+struct ApplicationCommandData {
+    name: String,
 }
 
 #[derive(Debug)]
@@ -149,6 +249,16 @@ enum InteractionResponse {
         #[serde(rename = "type")]
         _type: InteractionCallbackType<1>,
     },
+    ChannelMessageWithSource {
+        #[serde(rename = "type")]
+        _type: InteractionCallbackType<4>,
+        data: Message,
+    },
+}
+
+#[derive(Debug, Serialize)]
+struct Message {
+    content: String,
 }
 
 #[derive(Debug)]
