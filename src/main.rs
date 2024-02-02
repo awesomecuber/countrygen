@@ -18,7 +18,7 @@ use tokio::net::TcpListener;
 mod api {
     use color_eyre::{eyre::eyre, Result};
     use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
-    use serde::Serialize;
+    use serde::{Deserialize, Serialize};
 
     const DISCORD_URL: &str = "https://discord.com/api/v10";
 
@@ -40,7 +40,26 @@ mod api {
             Ok(Self { inner })
         }
 
-        pub async fn set_commands(&self, application_id: &str, commands: &[Command]) -> Result<()> {
+        pub async fn get_application(&self) -> Result<Application> {
+            let response = self
+                .inner
+                .get(format!("{DISCORD_URL}/applications/@me"))
+                .send()
+                .await?;
+
+            if !response.status().is_success() {
+                Err(eyre!(response.text().await?))
+            } else {
+                let response_bytes = response.bytes().await?;
+                Ok(serde_json::from_slice(&response_bytes)?)
+            }
+        }
+
+        pub async fn set_commands(
+            &self,
+            commands: &[Command],
+            application_id: String,
+        ) -> Result<()> {
             let response = self
                 .inner
                 .put(format!(
@@ -80,41 +99,47 @@ mod api {
         pub name: &'static str,
         pub description: &'static str,
     }
+
+    #[derive(Deserialize)]
+    pub struct Application {
+        pub id: String,
+        pub verify_key: String,
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let bot_key = std::env::var("BOT_KEY").wrap_err(eyre!("must specify bot key with BOT_KEY"))?;
-    let application_id = std::env::var("APPLICATION_ID")
-        .wrap_err(eyre!("must specify application ID with APPLICATION_ID"))?;
-    let interaction_endpoints_url = std::env::var("INTERACTION_ENDPOINTS_URL").ok();
-    let public_key =
-        std::env::var("PUBLIC_KEY").wrap_err(eyre!("must specify public key with PUBLIC_KEY"))?;
-    let verifying_key = {
-        let bytes = parse_hex(&public_key).ok_or(eyre!("invalid hex"))?;
-        VerifyingKey::from_bytes(&bytes)?
-    };
+    let interactions_endpoint_url = std::env::var("INTERACTIONS_ENDPOINT_URL").wrap_err(eyre!(
+        "must specify interactions endpoint URL with INTERACTIONS_ENDPOINT_URL"
+    ))?;
 
     let discord_client = api::Client::new(&bot_key)?;
 
+    let app = discord_client.get_application().await?;
+
     discord_client
         .set_commands(
-            &application_id,
             &[Command {
                 name: "city",
                 description: "generate a random city",
             }],
+            app.id,
         )
         .await?;
 
-    if let Some(url) = interaction_endpoints_url {
-        tokio::spawn(async move {
-            discord_client
-                .set_interaction_endpoints_url(&url)
-                .await
-                .unwrap()
-        });
-    }
+    // spawned in a task because this call needs the server to be running in order to eventually succeed
+    tokio::spawn(async move {
+        discord_client
+            .set_interaction_endpoints_url(&interactions_endpoint_url)
+            .await
+            .unwrap()
+    });
+
+    let verifying_key = {
+        let bytes = parse_hex(&app.verify_key).ok_or(eyre!("invalid hex"))?;
+        VerifyingKey::from_bytes(&bytes)?
+    };
 
     let app = Router::new()
         .route("/", post(handle))

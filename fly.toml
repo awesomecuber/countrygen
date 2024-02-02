@@ -7,8 +7,7 @@ mounts = []
 processes = []
 
 [env]
-  APPLICATION_ID = "1196332894856155247"
-  PUBLIC_KEY = "71cbb6dc1a47c084c8c4c66c0365fd8f7a54a496408006c78dcba06d67ba4ddb"
+  INTERACTIONS_ENDPOINT_URL = "https://countrygen.fly.dev"
 
 [[services]]
   internal_port = 3000

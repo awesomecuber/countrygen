@@ -8,8 +8,8 @@ The flow is as follows:
 
 1. Use the Discord API to owerwrite application commands ([Discord docs](https://discord.com/developers/docs/interactions/application-commands#bulk-overwrite-global-application-commands)).
 1. Start the server.
-1. Using the Discord API, edit the application to set the "interactions endpoint URL" to the value of the environment variable `INTERACTIONS_ENDPOINT_URL`.
+1. Using the Discord API, edit the application to set the "interactions endpoint URL" to the value of the environment variable `INTERACTIONS_ENDPOINT_URL`. This only occurs if that environment variable is set.
 
 # Authenticating
 
-The outgoing Discord API requests are authenticated using a bot key that is read by the program using the environment variable `BOT_KEY`.
+The outgoing Discord API requests are authenticated using a bot key that is read by the program using the environment variable `BOT_KEY`. Incoming requests from the Discord API to the server are validated using the public key associated with the bot's application.
