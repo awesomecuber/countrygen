@@ -120,10 +120,16 @@ async fn main() -> Result<()> {
 
     discord_client
         .set_commands(
-            &[Command {
-                name: "city",
-                description: "generate a random city",
-            }],
+            &[
+                Command {
+                    name: "city",
+                    description: "generate a random city",
+                },
+                Command {
+                    name: "state",
+                    description: "generate a random state",
+                },
+            ],
             app.id,
         )
         .await?;
@@ -193,6 +199,15 @@ async fn handle(
                     content: {
                         let cities: Vec<_> = include_str!("city.txt").lines().collect();
                         (*cities.choose(&mut rand::thread_rng()).unwrap()).to_owned()
+                    },
+                },
+            },
+            "state" => InteractionResponse::ChannelMessageWithSource {
+                _type: InteractionCallbackType,
+                data: Message {
+                    content: {
+                        let states: Vec<_> = include_str!("state.txt").lines().collect();
+                        (*states.choose(&mut rand::thread_rng()).unwrap()).to_owned()
                     },
                 },
             },

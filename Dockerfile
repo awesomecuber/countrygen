@@ -28,6 +28,7 @@ RUN set -eux; \
 
 # copy the build artifact from the build stage
 COPY --from=build /countrygen/src/city.txt .
+COPY --from=build /countrygen/src/state.txt .
 COPY --from=build /countrygen/target/release/countrygen .
 
 # set the startup command to run your binary
