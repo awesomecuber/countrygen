@@ -123,7 +123,12 @@ async fn main() -> Result<()> {
             &[
                 Command {
                     name: "city",
-                    description: "generate a random city",
+                    description: "generate a random city (population min: 100,000)",
+                },
+                Command {
+                    name: "usacity",
+                    description:
+                        "generate a random city that is in the USA (population min: 100,000)",
                 },
                 Command {
                     name: "state",
@@ -199,6 +204,15 @@ async fn handle(
                     content: {
                         let cities: Vec<_> = include_str!("city.txt").lines().collect();
                         (*cities.choose(&mut rand::thread_rng()).unwrap()).to_owned()
+                    },
+                },
+            },
+            "usacity" => InteractionResponse::ChannelMessageWithSource {
+                _type: InteractionCallbackType,
+                data: Message {
+                    content: {
+                        let usa_cities: Vec<_> = include_str!("usacity.txt").lines().collect();
+                        (*usa_cities.choose(&mut rand::thread_rng()).unwrap()).to_owned()
                     },
                 },
             },
